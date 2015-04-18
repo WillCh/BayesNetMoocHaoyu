@@ -174,7 +174,9 @@ object BayesNetMooc3 {
       var j = 0;
       batchSize = batchSize
       for (i <- 0 until ndata by batchSize) { // Default is to do this just once
-        sample(sdata(?, i until math.min(ndata, i + batchSize)), k)
+        val data = sdata(?, i until math.min(ndata, i + batchSize))
+        val realBatchSize = data.ncols
+        sample(data, k)
         updateCpt
         eval
       }
@@ -277,6 +279,15 @@ object BayesNetMooc3 {
   def computeP(ids: IMat, pids: IMat, i: Int, pi: Array[FMat], pMatrix: FMat, statei: FMat, saveID: IMat, numPi: Int) = {
     val nodei = ln(getCpt(cptOffset(pids) + IMat(iproject(pids, ?) * statei)) + 1e-10)
     //println("nodei is " + nodei)
+    /**
+    println("offsect debug")
+    println("the statei is ")
+    println("the offsect is " + cptOffset)
+    printMatrix(statei)
+    println("the pids is " + pids)
+    println((cptOffset(pids) + IMat(iproject(pids, ?) * statei)))
+    println("end of debug")
+    **/
     var pii = zeros(numPi, batchSize)
     pii(saveID, ?) = exp(pproject(ids, pids) * nodei)   // Un-normalized probs, i.e., Pr(X_i | parents_i)
     //println("pi is " + pi(i))
@@ -346,41 +357,74 @@ object BayesNetMooc3 {
     println("updateCPT")
     printMatrix(state)
     println((state>0))
-    // TODO: the counts is not correct.
-    for (i <- 0 until maxState) {
-      println((state == i))
-      val index = IMat((cptOffset + iproject * (state == i)) *@ (state == i)) 
-      println(i +" the index looks like: " + index) // only show the index non-zeros
-      var counts = zeros(cpt.length, 1)
-      for (j <- 0 until nstate) {
-        //println("the find " + find(index(?, j) > 0))
-        counts(index(find(index(?, j) > 0))) = counts(index(find(index(?, j) > 0))) + 1
-      }
-      counts = counts + beta
-      println("the count looks like: ")
-      printMatrix(counts)
+    val index = IMat(cptOffset + iproject * state)
+    var counts = zeros(cpt.length, 1)
+    for (i <- 0 until nstate) {
+      counts(index(?, i)) = counts(index(?, i)) + 1
     }
-    
-    // normalize count matrix
-    /**
-    var normcounts = zeros(counts.length, 1)
-    normcounts(0 until counts.length - 1 by 2) = counts(1 until counts.length by 2)
-    normcounts(1 until counts.length by 2) = counts(0 until counts.length - 1 by 2)
-    normcounts = normcounts + counts
-    counts = counts / normcounts
-    cpt_old = counts.copy // Daniel: we never use this? It's only "counts" we use
+    counts = counts + beta
+
+    for (i <- 0 until graph.n-1) {
+      var offset = cptOffset(i)
+      val endOffset = cptOffset(i+1)
+      while (offset < endOffset) {
+        val normConst = sum( counts(offset until offset+statesPerNode(i)) )
+        counts(offset until offset+statesPerNode(i)) = counts(offset until offset+statesPerNode(i)) / normConst
+        offset = offset + statesPerNode(i)
+      }
+    }
+    var lastOffset = cptOffset(graph.n-1)
+    while (lastOffset < counts.length) {
+      val normConst = sum( counts(lastOffset until lastOffset+statesPerNode(graph.n-1)) )
+      counts(lastOffset until lastOffset+statesPerNode(graph.n-1)) = counts(lastOffset until lastOffset+statesPerNode(graph.n-1)) / normConst
+      lastOffset = lastOffset + statesPerNode(graph.n-1)
+    }
     cpt = (1 - alpha) * cpt + alpha * counts
-    **/
+    println("the cpt is")
+    printMatrix(cpt)
+    
   }
 
   // evaluation method
   def eval() = {
-    // TODO
+    
   }
 
   // prediction method, i = Gibbs sampling iteration number
   def pred(i: Int) = {
-    // TODO
+    /**
+    val ndata = size(sdata, 1)
+    for (j <- 0 until ndata by batchSize) {
+      //val jend = math.min(ndata, j + opts.batchSize)
+      //val minidata = data(j until jend, ?)
+      val minidata = sdata
+      // sample mini-batch of data
+      sample(minidata, 0)
+      // update parameters
+    }
+    //val vdatat = loadSMat("C:/data/zp_dlm_FT_code_and_data/train4.smat")
+    //val vdata = vdatat.t
+    val (r, c, v) = find3(tdata)
+    var correct = 0f
+    var tot = 0f
+    for (i <- 0 until tdata.nnz) {
+      val ri = r(i).toInt
+      val ci = c(i).toInt
+      if (predprobs(ri, ci).v != 0.5) {
+        val pred = (predprobs(ri, ci).v >= 0.5)
+        val targ = (v(i).v >= 0)
+        //println(probs(ri, ci).v, v(i).v)
+        //println(pred, targ)
+        if (pred == targ) {
+          correct = correct + 1
+        }
+        tot = tot + 1
+      }
+    }
+    //println(sdata.nnz, tot, correct)
+
+    println(i + "," + correct / tot)
+    **/
   }
 
   // The subsequent methods are all for preparing the data, so not relevant to Gibbs Sampling. 
@@ -438,6 +482,7 @@ object BayesNetMooc3 {
    * @param path The path to the dag file (e.g., dag.txt).
    * @return An adjacency matrix (of type SMat) for use to create a graph.
    */
+   // TODO: we need to change it to be read into the 1,2,3,4,.., and fill unknown with -1
   def loadDag(path: String, n: Int) = {
     var row = izeros(bufsize, 1)
     var col = izeros(bufsize, 1)
@@ -509,12 +554,14 @@ object BayesNetMooc3 {
       if (t(5) == "1") {
         row(ptr) = sMap(shash)
         col(ptr) = nodeMap("I" + t(2))
-        v(ptr) = (t(3).toFloat - 0.5) * 2
+        // I change this one to be:
+        // orgininal one: v(ptr) = (t(3).toFloat - 0.5) * 2
+        v(ptr) = t(3).toFloat
         ptr = ptr + 1
       }
     }
     var s = sparse(col(0 until ptr), row(0 until ptr), v(0 until ptr), nq, ns)
-    (s > 0) - (s < 0)
+    s
   }
 
   /**
@@ -550,12 +597,12 @@ object BayesNetMooc3 {
       if (t(5) == "0") {
         row(ptr) = sMap(shash)
         col(ptr) = nodeMap("I" + t(2))
-        v(ptr) = (t(3).toFloat - 0.5) * 2
+        v(ptr) = t(3).toFloat
         ptr = ptr + 1
       }
     }
     var s = sparse(col(0 until ptr), row(0 until ptr), v(0 until ptr), nq, ns)
-    (s > 0) - (s < 0)
+    s
   }
 
   /**
