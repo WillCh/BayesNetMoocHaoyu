@@ -208,7 +208,8 @@ object BayesNetMooc3 {
       // TODO Investigate the impact of stateSet and pSet on the matrix caching for GPUs.
       val idInColor = find(graph.colors == c)
       println("color in this group is " + idInColor)
-      val numState = IMat(maxi(maxi(statesPerNode(idInColor),1),2) + 1).v
+      //val numState = IMat(maxi(maxi(statesPerNode(idInColor),1),2) + 1).v // here we don't need to add 1
+      val numState = IMat(maxi(maxi(statesPerNode(idInColor),1),2)).v
       println("numState is " + numState)
       var stateSet = new Array[FMat](numState)
       var pSet = new Array[FMat](numState)
@@ -339,13 +340,29 @@ object BayesNetMooc3 {
   // update the cpt method
   def updateCpt = {
     val nstate = size(state, 2)       // num of students
-    val index = IMat(cptoffset + iproject * (state > 0))
-    var counts = zeros(cpt.length, 1)
-    for (i <- 0 until nstate) {
-      counts(index(?, i)) = counts(index(?, i)) + 1
+    val maxState = maxi(statesPerNode, 1).v
+    //println("the max state is " + maxState)
+    // here we need count each different state value by a loop
+    println("updateCPT")
+    printMatrix(state)
+    println((state>0))
+    // TODO: the counts is not correct.
+    for (i <- 0 until maxState) {
+      println((state == i))
+      val index = IMat((cptOffset + iproject * (state == i)) *@ (state == i)) 
+      println(i +" the index looks like: " + index) // only show the index non-zeros
+      var counts = zeros(cpt.length, 1)
+      for (j <- 0 until nstate) {
+        //println("the find " + find(index(?, j) > 0))
+        counts(index(find(index(?, j) > 0))) = counts(index(find(index(?, j) > 0))) + 1
+      }
+      counts = counts + beta
+      println("the count looks like: ")
+      printMatrix(counts)
     }
-    counts = counts + beta
+    
     // normalize count matrix
+    /**
     var normcounts = zeros(counts.length, 1)
     normcounts(0 until counts.length - 1 by 2) = counts(1 until counts.length by 2)
     normcounts(1 until counts.length by 2) = counts(0 until counts.length - 1 by 2)
@@ -353,6 +370,7 @@ object BayesNetMooc3 {
     counts = counts / normcounts
     cpt_old = counts.copy // Daniel: we never use this? It's only "counts" we use
     cpt = (1 - alpha) * cpt + alpha * counts
+    **/
   }
 
   // evaluation method
@@ -563,5 +581,16 @@ object BayesNetMooc3 {
     }
     writer.close
   }
- 
+  
+  //-----------------------------------------------------------------------------------------------//
+  // debug method below
+  def printMatrix(mat: FMat) = {
+    
+    for(i <- 0 until mat.nrows) {
+      for (j <- 0 until mat.ncols) {
+        print(mat(i,j) + " ")
+      }
+      println()
+    }
+  }
 }
